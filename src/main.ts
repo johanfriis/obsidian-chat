@@ -30,6 +30,7 @@ export default class ChatPlugin extends Plugin {
     this.addCommand({
       id: "obsidian-chat-do",
       name: `Chat with ${this.chatName}`,
+      icon: "message-circle",
       editorCheckCallback: (checking, editor) => {
         if (checking) {
           if (this.settings.apiKey) {
@@ -44,6 +45,7 @@ export default class ChatPlugin extends Plugin {
     this.addCommand({
       id: "obsidian-chat-new-chat",
       name: `Start a new chat`,
+      icon: "plus-circle",
       editorCheckCallback: (checking, editor) => {
         if (checking) {
           if (this.settings.apiKey) {
@@ -58,6 +60,7 @@ export default class ChatPlugin extends Plugin {
     this.addCommand({
       id: "obsidian-chat-new-chat-with-template",
       name: "Start a new chat with a template",
+      icon: "file-plus-2",
       editorCheckCallback: (checking) => {
         const templates = getTemplates(this.app, this);
         if (checking) {
@@ -76,6 +79,7 @@ export default class ChatPlugin extends Plugin {
     this.addCommand({
       id: "obsidian-chat-infer-section-title",
       name: "Infer section title",
+      icon: "flashlight",
       editorCheckCallback: (checking, editor) => {
         if (checking) {
           if (this.settings.apiKey) {
@@ -90,6 +94,7 @@ export default class ChatPlugin extends Plugin {
     this.addCommand({
       id: "obsidian-chat-infer-document-title",
       name: "Infer document title",
+      icon: "lightbulb",
       editorCheckCallback: (checking, editor) => {
         if (checking) {
           if (this.settings.apiKey) {
@@ -104,6 +109,7 @@ export default class ChatPlugin extends Plugin {
     this.addCommand({
       id: "obsidian-chat-infer-keywords",
       name: "Infer keywords",
+      icon: "key",
       editorCheckCallback: (checking, editor) => {
         if (checking) {
           if (this.settings.apiKey) {
