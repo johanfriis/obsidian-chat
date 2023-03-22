@@ -1,3 +1,6 @@
 export type Settings = {
-  someField: string;
+  apiKey: string;
+  templateFolder?: string;
+  defaultTemplate?: string;
+  chatName?: string;
 };
