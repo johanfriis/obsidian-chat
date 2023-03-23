@@ -1,7 +1,7 @@
 import { Editor, MarkdownView, Notice, Plugin, TFile, TFolder } from "obsidian";
 import { ChatSettingsTab, DEFAULT_SETTINGS, Settings } from "./settings";
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from "openai";
-import gptoken from "gptoken";
+import { encode, estimateCost, ModelFamilyIDs } from "gpt-token-utils";
 
 import {
   CHAT_CONFIG_TEMPLATE,
@@ -274,8 +274,6 @@ export default class ChatPlugin extends Plugin {
         lastConfigLine
       );
 
-      console.log(messages);
-
       if (
         messages.length === 0 ||
         messages[messages.length - 1]?.role !== "user"
@@ -288,13 +286,14 @@ export default class ChatPlugin extends Plugin {
       const mergedMessages = settings.messages
         .flatMap((message) => message.content)
         .join("");
-      const tokenStats = gptoken.tokenStats(gptoken.encode(mergedMessages));
+      const tokens = encode(mergedMessages);
+      const cost = estimateCost(ModelFamilyIDs.ChatGPT, tokens);
 
       editor.replaceRange(
         [
           "\n\n",
           "<div class='chat-loading'><div><div></div></div>",
-          `<span class='chat-loading-tokens'>Tokens: ${tokenStats.count}</span>`,
+          `<span class='chat-loading-tokens'>Tokens: ${tokens.length}, Cost: ${cost.usage}</span>`,
           "</div>",
         ].join(""),
         {
@@ -309,6 +308,8 @@ export default class ChatPlugin extends Plugin {
       // const response = "Howdy there partner";
 
       const completion = await this.openai.createChatCompletion(settings);
+
+      console.log(completion);
 
       const response = completion.data.choices[0].message?.content
         .replace(/\n/g, "\n> ")
