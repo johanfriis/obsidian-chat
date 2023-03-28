@@ -309,8 +309,6 @@ export default class ChatPlugin extends Plugin {
 
       const completion = await this.openai.createChatCompletion(settings);
 
-      console.log(completion);
-
       const response = completion.data.choices[0].message?.content
         .replace(/\n/g, "\n> ")
         .concat("\n");
