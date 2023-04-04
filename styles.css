@@ -1,98 +1,17 @@
-.callout[data-callout="chat-config"].callout[data-callout="chat-config"].callout[data-callout="chat-config"] {
-  --callout-icon: lucide-bot;
+.chat-spinner {
+  color: var(--color-accent);
+  animation-name: chat-spin;
+  animation-duration: 5000ms;
+  animation-iteration-count: infinite;
+  animation-timing-function: linear;
 }
 
-.callout[data-callout="chat-config"] > .callout-title > .callout-icon {
-  margin-top: -0.02em;
-  margin-right: 4px;
-}
-
-.callout[data-callout="chat-response"].callout[data-callout="chat-response"].callout[data-callout="chat-response"] {
-  border-width: 0px;
-  border-left-width: 1px;
-  border-color: rgba(var(--callout-color), 0.15);
-  background-color: rgba(var(--callout-color), 0.03);
-  --callout-icon: lucide-message-circle;
-}
-
-.callout[data-callout="chat-response"].callout[data-callout="chat-response"]
-  > .callout-title.callout-title {
-  background-color: rgba(var(--callout-color), 0.02);
-}
-
-.callout[data-callout="chat-response"] > .callout-content {
-  border-top-width: 0px !important;
-  background-color: rgba(var(--callout-color), 0.01) !important;
-}
-
-.callout[data-callout="chat-response"] > .callout-title > .callout-icon {
-  margin-top: 0.08em;
-  margin-right: 4px;
-}
-
-.chat-loading .chat-loading-tokens {
-  margin-left: 29px;
-  font-size: 0.7em;
-  display: block;
-  margin-top: -20px;
-}
-
-.chat-loading > div {
-  display: inline-block;
-  position: relative;
-  width: 26px;
-  height: 16px;
-  transform: rotate(45deg);
-  transform-origin: 12px 8px;
-}
-
-.chat-loading > div > div {
-  top: 8px;
-  left: 8px;
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  background: var(--color-accent);
-  animation: chat-loading 1.2s infinite cubic-bezier(0.215, 0.61, 0.355, 1);
-}
-
-.chat-loading > div > div:after,
-.chat-loading > div > div:before {
-  content: " ";
-  position: absolute;
-  display: block;
-  width: 8px;
-  height: 8px;
-  background: var(--color-accent);
-}
-
-.chat-loading > div > div:before {
-  left: -7px;
-  border-radius: 50% 0 0 50%;
-}
-
-.chat-loading > div > div:after {
-  top: -7px;
-  border-radius: 50% 50% 0 0;
-}
-
-@keyframes chat-loading {
-  0% {
-    transform: scale(0.95);
+@keyframes chat-spin {
+  from {
+    transform: rotate(0deg);
   }
-  5% {
-    transform: scale(1.1);
-  }
-  39% {
-    transform: scale(0.85);
-  }
-  45% {
-    transform: scale(1);
-  }
-  60% {
-    transform: scale(0.95);
-  }
-  100% {
-    transform: scale(0.9);
+
+  to {
+    transform: rotate(360deg);
   }
 }

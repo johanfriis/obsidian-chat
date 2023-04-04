@@ -1,46 +1,55 @@
-import { Editor, MarkdownView, Notice, Plugin, TFile, TFolder } from "obsidian";
+import { Editor, Notice, Plugin, TFile, TFolder, setIcon } from "obsidian";
 import { ChatSettingsTab, DEFAULT_SETTINGS, Settings } from "./settings";
-import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from "openai";
-import { encode, estimateCost, ModelFamilyIDs } from "gpt-token-utils";
-
 import {
-  CHAT_CONFIG_TEMPLATE,
-  CHAT_RESPONSE_TEMPLATE,
-  DEFAULT_CHAT_SETTINGS,
-  KEYWORD_INFERENCE_SETTINGS,
-  TITLE_INFERENCE_SETTINGS,
-} from "./consts";
-import { cleanTitle, getTemplates, parseChatConfig } from "./helpers";
-import { ChatConfig, ChatSettings } from "./types";
-import { TitleChooserModal } from "./modules";
+  ChatCompletionRequestMessage,
+  ChatCompletionRequestMessageRoleEnum,
+  Configuration,
+  CreateChatCompletionRequest,
+  OpenAIApi,
+} from "openai";
+
+import { ChatSectionNotFound, DEFAULT_CHAT_SETTINGS } from "./consts";
+import {
+  getChatSection,
+  getProperties,
+  getTemplates,
+  startNewChat,
+} from "./helpers";
+import { ChatSection } from "./types";
+import { ChooserModal } from "./modules";
+
+class ChatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChatError";
+  }
+}
 
 export default class ChatPlugin extends Plugin {
   settings: Settings;
   openai: OpenAIApi;
+
+  statusBarEl: HTMLElement;
+  iconEl: HTMLElement;
+
+  chatTitle: string;
   chatName: string;
-  pluginName = "Obsidian Chat";
+  userName: string;
+
+  chatNameRegex: RegExp;
+  userNameRegex: RegExp;
+  systemNameRegex: RegExp;
 
   async onload() {
     await this.loadSettings();
 
-    this.chatName = this.settings.chatName ?? "Chat";
-
     this.addSettingTab(new ChatSettingsTab(this.app, this));
 
-    this.addCommand({
-      id: "obsidian-chat-do",
-      name: `Chat with ${this.chatName}`,
-      icon: "message-circle",
-      editorCheckCallback: (checking, editor) => {
-        if (checking) {
-          if (this.settings.apiKey) {
-            return true;
-          }
-          return false;
-        }
-        this.chat(editor);
-      },
-    });
+    this.statusBarEl = this.addStatusBarItem();
+    this.iconEl = this.statusBarEl.createDiv();
+    setIcon(this.iconEl, "bot");
+
+    this.startPlugin();
 
     this.addCommand({
       id: "obsidian-chat-new-chat",
@@ -53,7 +62,34 @@ export default class ChatPlugin extends Plugin {
           }
           return false;
         }
-        this.insertNewChat(editor);
+        this.startNewChat(editor);
+      },
+    });
+
+    this.addCommand({
+      id: "obsidian-chat-do",
+      name: `Chat with ${this.chatName}`,
+      icon: "message-circle",
+      editorCheckCallback: (checking, editor) => {
+        if (checking) {
+          if (this.settings.apiKey) {
+            return true;
+          }
+          return false;
+        }
+
+        new Promise((resolve) => {
+          this.toggleStatusBarIcon(true);
+          resolve(this.chat(editor));
+        })
+          .catch((error) => {
+            if (error instanceof ChatError) {
+              new Notice(`${this.manifest.name}: ${error.message}`);
+            }
+          })
+          .finally(() => {
+            this.toggleStatusBarIcon(false);
+          });
       },
     });
 
@@ -61,7 +97,7 @@ export default class ChatPlugin extends Plugin {
       id: "obsidian-chat-new-chat-with-template",
       name: "Start a new chat with a template",
       icon: "file-plus-2",
-      editorCheckCallback: (checking) => {
+      editorCheckCallback: (checking, editor) => {
         const templates = getTemplates(this.app, this);
         if (checking) {
           if (this.settings.apiKey && templates.length > 1) {
@@ -70,463 +106,228 @@ export default class ChatPlugin extends Plugin {
           return false;
         }
 
-        new TitleChooserModal(this.app, templates).start((title) => {
-          this.insertNewChat(undefined, title);
+        new ChooserModal(this.app, templates).start((title) => {
+          this.startNewChat(editor, title);
         });
       },
     });
+  }
 
-    this.addCommand({
-      id: "obsidian-chat-infer-section-title",
-      name: "Infer section title",
-      icon: "flashlight",
-      editorCheckCallback: (checking, editor) => {
-        if (checking) {
-          if (this.settings.apiKey) {
-            return true;
-          }
-          return false;
-        }
-        this.inferTitle(editor, false);
-      },
-    });
+  startPlugin() {
+    console.log("Starting Obsidian Chat plugin");
 
-    this.addCommand({
-      id: "obsidian-chat-infer-document-title",
-      name: "Infer document title",
-      icon: "lightbulb",
-      editorCheckCallback: (checking, editor) => {
-        if (checking) {
-          if (this.settings.apiKey) {
-            return true;
-          }
-          return false;
-        }
-        this.inferTitle(editor, true);
-      },
-    });
+    this.chatTitle = this.settings.chatTitle;
+    this.chatName = this.settings.chatName;
+    this.userName = this.settings.userName;
 
-    this.addCommand({
-      id: "obsidian-chat-infer-keywords",
-      name: "Infer keywords",
-      icon: "key",
-      editorCheckCallback: (checking, editor) => {
-        if (checking) {
-          if (this.settings.apiKey) {
-            return true;
-          }
-          return false;
-        }
-        // https://platform.openai.com/examples/default-keywords
-        this.inferKeywords(editor);
-      },
-    });
+    this.chatNameRegex = new RegExp(`^#+ ${this.chatName}`);
+    this.userNameRegex = new RegExp(`^#+ ${this.userName}`);
+    this.systemNameRegex = new RegExp(`^#+ System`);
 
     const configuration = new Configuration({
       apiKey: this.settings.apiKey,
     });
-
+    // FIXME: This is a hack to get around the User-Agent header being
+    //        set by the OpenAPI generator and causing a console error
+    delete configuration.baseOptions.headers["User-Agent"];
     this.openai = new OpenAIApi(configuration);
   }
 
-  async inferKeywords(editor: Editor) {
-    const messages: ChatCompletionRequestMessage[] = [
-      {
-        role: "user",
-        // content: ["Extract keywords from these messages:"].join(" "),
-        content: [
-          "Provide high level keywords for these messages.",
-          "Add some keywords on the theme and type of the messages.",
-        ].join(" "),
-      },
-    ];
+  async chat(editor: Editor, customSystemMessages?: string[]) {
+    const chatSection = this.getChatSection(editor);
 
-    try {
-      const [[_, lastConfigLine], __, ___] = await this.findCurrentChatConfig(
-        editor
-      );
+    const inlineContent = chatSection.content.split(/\r?\n|\r|\n/g);
+    const inlineProps = getProperties(inlineContent);
 
-      const [____, chatMessages] = await this.findCurrentChatContents(
-        editor,
-        lastConfigLine
-      );
+    const templateContent = await this.getTemplateContent(
+      inlineProps.config.template
+    );
+    const templateProps = getProperties(templateContent);
 
-      messages[0].content = messages[0].content.concat(
-        `\nMessages:\n\n${JSON.stringify(chatMessages)}`
-      );
-    } catch (error) {
-      messages[0].content = messages[0].content.concat(
-        `\nMessages:\n\n${JSON.stringify({
-          role: "user",
-          content: editor.getValue(),
-        })}`
-      );
-    }
+    const chatSettings = Object.assign(
+      DEFAULT_CHAT_SETTINGS,
+      templateProps.settings,
+      inlineProps.settings
+    );
 
-    const settings = {
-      ...KEYWORD_INFERENCE_SETTINGS,
-      messages,
+    const inlineMessages = this.getMessages(inlineContent);
+    const templateMessages = this.getMessages(templateContent);
+    const systemMessage = this.createSystemMessages(customSystemMessages);
+
+    const payload = {
+      ...chatSettings,
+      messages: [...systemMessage, ...templateMessages, ...inlineMessages],
     };
 
-    const completion = await this.openai.createChatCompletion(settings);
-
-    const keywords = completion.data.choices[0].message?.content.trim();
-
-    if (keywords) {
-      editor.replaceRange(keywords, editor.getCursor());
-    } else {
-      new Notice(`${this.pluginName}: Could not infer keywords`);
-      console.log({ completion });
-    }
+    const response = await this.fetchResponse(payload);
+    this.insertResponse(editor, chatSection, response);
   }
 
-  async inferTitle(editor: Editor, documentTitle: boolean) {
-    const messages: ChatCompletionRequestMessage[] = [
-      {
-        role: "user",
-        content: [
-          "Infer title from the summary of the content of these messages.",
-          "Return 3 suggestions for the title and nothing else",
-        ].join(" "),
-      },
-    ];
+  async fetchResponse(payload: CreateChatCompletionRequest): Promise<string> {
+    // await new Promise((resolve) => setTimeout(resolve, 500));
+    // return "Howdy there partner";
 
-    let configTitleLine = -1;
+    const response = await this.openai.createChatCompletion(payload);
+    const responseMessage = response.data.choices[0].message?.content;
 
-    try {
-      const [[firstConfigLine, lastConfigLine], __, ___] =
-        await this.findCurrentChatConfig(editor);
+    if (!responseMessage) {
+      console.error(response);
+      throw new ChatError("No response from OpenAI");
+    }
 
-      configTitleLine = firstConfigLine;
+    return responseMessage;
+  }
 
-      const [_, chatMessages] = await this.findCurrentChatContents(
-        editor,
-        lastConfigLine
-      );
+  insertResponse(editor: Editor, chatSection: ChatSection, response?: string) {
+    const lines = chatSection.content.split(/\r?\n|\r|\n/g);
 
-      messages[0].content = messages[0].content.concat(
-        `\nMessages:\n\n${JSON.stringify(chatMessages)}`
-      );
-    } catch (error) {
-      if (!documentTitle) {
-        new Notice(`${this.pluginName}: No section to set title for`);
-        return;
+    let endLineOffset = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i] !== "") {
+        break;
       }
-
-      messages[0].content = messages[0].content.concat(
-        `\nMessages:\n\n${JSON.stringify({
-          role: "user",
-          content: editor.getValue(),
-        })}`
-      );
+      endLineOffset++;
     }
 
-    const settings = {
-      ...TITLE_INFERENCE_SETTINGS,
-      messages,
-    };
+    const insertLine = chatSection.endLine - endLineOffset;
+    const insertText = [
+      `\n\n`,
+      `${"#".repeat(chatSection.headingLevel + 1)} ${this.chatName}\n\n`,
+      `${response}\n\n`,
+      `${"#".repeat(chatSection.headingLevel + 1)} ${this.userName}\n\n`,
+    ].join("");
+    const insertLineCount = insertText.split(/\r?\n|\r|\n/g).length;
 
-    const completion = await this.openai.createChatCompletion(settings);
+    editor.replaceRange(insertText, {
+      line: insertLine,
+      ch: Infinity,
+    });
 
-    const titles = completion.data.choices[0].message?.content;
-    const cleanedTitles = titles
-      ?.trim()
-      ?.split("\n")
-      .map((title) => cleanTitle(title, documentTitle));
-
-    if (cleanedTitles) {
-      new TitleChooserModal(this.app, cleanedTitles).start(async (title) => {
-        if (documentTitle) {
-          let view = this.app.workspace.getActiveViewOfType(MarkdownView);
-          if (view) {
-            const newFilePath = `${view.file.parent.path}/${title}.${view.file.extension}`;
-            await app.fileManager.renameFile(view.file, newFilePath);
-          }
-        } else if (configTitleLine !== -1) {
-          editor.replaceRange(
-            `> ${CHAT_CONFIG_TEMPLATE} ${title}`,
-            {
-              line: configTitleLine,
-              ch: 0,
-            },
-            {
-              line: configTitleLine,
-              ch: Infinity,
-            }
-          );
-        }
-      });
-    } else {
-      new Notice(`${this.pluginName}: Could not infer title`);
-      console.log({ completion });
-    }
+    editor.setCursor(insertLine + insertLineCount - 1, 0);
   }
 
-  async chat(editor: Editor) {
-    const lines = editor.getValue().split("\n");
-
-    try {
-      const [[_, lastConfigLine], __, settings] =
-        await this.findCurrentChatConfig(editor);
-
-      const [lastChatLine, messages] = await this.findCurrentChatContents(
-        editor,
-        lastConfigLine
-      );
-
-      if (
-        messages.length === 0 ||
-        messages[messages.length - 1]?.role !== "user"
-      ) {
-        throw new Error("No user provided message");
-      }
-
-      settings.messages = settings.messages.concat(messages);
-
-      const mergedMessages = settings.messages
-        .flatMap((message) => message.content)
-        .join("");
-      const tokens = encode(mergedMessages);
-      const cost = estimateCost(ModelFamilyIDs.ChatGPT, tokens);
-
-      editor.replaceRange(
-        [
-          "\n\n",
-          "<div class='chat-loading'><div><div></div></div>",
-          `<span class='chat-loading-tokens'>Tokens: ${tokens.length}, Cost: ${cost.usage}</span>`,
-          "</div>",
-        ].join(""),
-        {
-          line: lastChatLine,
-          ch: lines[lastChatLine].length,
-        }
-      );
-
-      editor.setCursor(lastChatLine);
-
-      // await new Promise((resolve) => setTimeout(resolve, 3000));
-      // const response = "Howdy there partner";
-
-      const completion = await this.openai.createChatCompletion(settings);
-
-      const response = completion.data.choices[0].message?.content
-        .replace(/\n/g, "\n> ")
-        .concat("\n");
-
-      const match = response?.match(/(\n*)/);
-      const skipLines = match ? match[1].length + 2 : 0;
-
-      editor.replaceRange(
-        `> ${CHAT_RESPONSE_TEMPLATE} ${this.chatName}\n> ${response}\n\n`,
-        {
-          line: lastChatLine + 2,
-          ch: 0,
-        },
-        {
-          line: lastChatLine + 2,
-          ch: Infinity,
-        }
-      );
-
-      editor.setCursor(lastChatLine + 3 + skipLines);
-    } catch (error) {
-      new Notice(`${this.pluginName}: ${error.message}`);
-      console.error(error.message);
+  getMessages(content: string[]): ChatCompletionRequestMessage[] {
+    const { positions } = getProperties(content);
+    if (positions) {
+      content.splice(positions.start, positions.end - positions.start + 1);
     }
+    const messages = this.parseMessages(content);
+    if (messages.length === 0) {
+      throw new ChatError("Please provide a message to start the chat");
+    }
+    return messages;
   }
 
-  insertNewChat(editor?: Editor, template?: string) {
-    editor = this.getEditor(editor);
-    const lines = editor.getValue().split("\n");
-    const cursor = editor.getCursor();
-
-    let callout = `> ${CHAT_CONFIG_TEMPLATE} Start a new chat with ${this.chatName}`;
-    if (template) {
-      callout += `\n> template::${template}`;
-    }
-    callout += `\n>\n`;
-
-    if (lines.length > cursor.line) {
-      callout += "\n";
-    }
-
-    editor.replaceRange(callout, cursor);
-
-    const newCursor = cursor.line + (template ? 4 : 3);
-    editor.setCursor(newCursor);
-  }
-
-  async findCurrentChatContents(
-    editor: Editor,
-    lastConfigLine: number
-  ): Promise<[number, ChatCompletionRequestMessage[]]> {
-    const lines = editor.getValue().split("\n");
+  parseMessages(content: string[]): ChatCompletionRequestMessage[] {
     let messages: ChatCompletionRequestMessage[] = [];
 
-    // starting at lineNumber, move downwards until we reach the end of the
-    // document or the beginning of a new chat
-    let lastChatLine = lastConfigLine;
-    for (let i = lastConfigLine + 1; i < lines.length; i++) {
-      let line = lines[i];
-      lastChatLine = i;
-
-      const lastMessage = messages[messages.length - 1];
-
-      if (line.startsWith(`> ${CHAT_CONFIG_TEMPLATE}`)) {
-        break;
-      }
-
-      if (line.startsWith(`> ${CHAT_RESPONSE_TEMPLATE}`)) {
-        messages.push({
-          role: "assistant",
-          content: "",
-        });
+    let role: ChatCompletionRequestMessageRoleEnum = "user";
+    for (let i = 0; i < content.length; i++) {
+      const line = content[i];
+      if (line.match(this.chatNameRegex)) {
+        role = "assistant";
         continue;
       }
 
-      if (
-        (!lastMessage || lastMessage?.role === "assistant") &&
-        !line.startsWith(">")
-      ) {
-        messages.push({
-          role: "user",
-          content: "",
-        });
+      if (line.match(this.userNameRegex)) {
+        role = "user";
         continue;
       }
 
-      if (line.startsWith(">")) {
-        if (messages[messages.length - 1]) {
-          messages[messages.length - 1].content += line.slice(2) + "\n";
-        }
+      if (line.match(this.systemNameRegex)) {
+        role = "system";
+        continue;
+      }
+
+      // if the previous message was from the same role, then we need to add the line to the previous message
+      if (messages.length > 0 && messages[messages.length - 1].role === role) {
+        messages[messages.length - 1].content += `\n${line}`;
       } else {
-        if (messages[messages.length - 1]) {
-          messages[messages.length - 1].content += line + "\n";
-        }
-        continue;
+        messages.push({
+          role,
+          content: line,
+        });
       }
     }
 
-    const lastMessage = messages.slice(-1)[0].content;
-    const match = lastMessage.match(/\n+$/);
-    const extraNewlines = match ? match[0].length : 0;
-
-    return [
-      lastChatLine - (extraNewlines - 1),
-      messages.filter((message) => message.content.replace(/\n/g, "") !== ""),
-    ];
+    // trim content and remove empty messages
+    return messages.flatMap(({ role, content }) => {
+      if (content.trim() === "") return [];
+      return {
+        role,
+        content: content.trim(),
+      };
+    });
   }
 
-  async findCurrentChatConfig(
-    editor: Editor
-  ): Promise<[[number, number], Partial<ChatConfig>, ChatSettings]> {
-    const currentCursor = editor.getCursor();
-    const contents = editor.getValue().split("\n");
-
-    // starting at cursor, move upwards until we find the CHAT_START_TEMPLATE
-    let firstLine = -1;
-    for (let i = currentCursor.line - 1; i >= 0; i--) {
-      if (contents[i].startsWith(`> ${CHAT_CONFIG_TEMPLATE}`)) {
-        firstLine = i;
-        break;
-      }
+  getChatSection(editor: Editor): ChatSection {
+    const file = this.app.workspace.getActiveFile();
+    if (!file) {
+      throw new ChatError(`Could not find file`);
     }
 
-    if (firstLine < 0) {
-      throw new Error("No chat found");
+    const metadata = this.app.metadataCache.getFileCache(file);
+    if (!metadata) {
+      throw new ChatError(`Could not find file metadata`);
     }
 
-    const rawConfig: string[] = [];
-
-    let lastLine = firstLine;
-    for (let i = firstLine; i < contents.length; i++) {
-      let line = contents[i];
-      if (line.startsWith(">")) {
-        rawConfig.push(line.replace(/>\s?/, ""));
-      } else {
-        lastLine = i - 1;
-        break;
-      }
-    }
-
-    const [config, settings, messages] = parseChatConfig(rawConfig);
-    const [templateSettings, templateMessages] = await this.getTemplateSettings(
-      config.template
-    );
-    const systemMessages = this.createSystemMessages(
-      messages.length > 0 ? messages : templateMessages
+    const chatSection = getChatSection(
+      editor,
+      metadata,
+      this.settings.chatTitle
     );
 
-    return [
-      [firstLine, lastLine],
-      config,
-      Object.assign(templateSettings, {
-        ...settings,
-        messages: systemMessages,
-      }),
-    ];
+    if (chatSection === ChatSectionNotFound) {
+      throw new ChatError(`Could not find chat section`);
+    }
+
+    return chatSection;
   }
 
-  async getTemplateSettings(
-    template: string | undefined
-  ): Promise<[ChatSettings, string[]]> {
+  toggleStatusBarIcon(active: boolean) {
+    if (active) {
+      this.iconEl.addClass("chat-spinner");
+    } else {
+      this.iconEl.removeClass("chat-spinner");
+    }
+  }
+
+  startNewChat(editor: Editor, template?: string) {
+    const position = startNewChat(editor, this.settings.chatTitle, template);
+    editor.setCursor(position);
+  }
+
+  async getTemplateContent(template: string | undefined): Promise<string[]> {
     if (!this.settings.templateFolder) {
-      return [DEFAULT_CHAT_SETTINGS, []];
+      return [];
     }
 
     template = template ?? this.settings.defaultTemplate;
     if (!template) {
-      return [DEFAULT_CHAT_SETTINGS, []];
+      return [];
     }
 
     const templatePath = `${this.settings.templateFolder}/${template}.md`;
     const templateFile = this.app.vault.getAbstractFileByPath(templatePath);
 
     if (!templateFile || templateFile instanceof TFolder) {
-      return [DEFAULT_CHAT_SETTINGS, []];
+      return [];
     }
 
     const templateText = await this.app.vault.read(templateFile as TFile);
-    const [_, settings, messages] = parseChatConfig(templateText.split("\n"));
-
-    // const systemMessages = this.createSystemMessages(messages);
-
-    const chatSettings = Object.assign({}, DEFAULT_CHAT_SETTINGS, settings);
-    return [chatSettings, messages];
+    return templateText.split(/\r?\n|\r|\n/g);
   }
 
-  getDefaultSystemMessage(): string[] {
+  getDefaultSystemMessage() {
     return [`You will refer to yourself as ${this.chatName}`];
   }
 
-  createSystemMessages(
-    messages: string[]
-  ): Array<ChatCompletionRequestMessage> {
+  createSystemMessages(messages?: string[]): ChatCompletionRequestMessage[] {
     const defaultSystemMessage = this.getDefaultSystemMessage();
-    return [...defaultSystemMessage, ...messages].map(
-      (message) =>
-        ({
-          role: "system",
-          content: message,
-        } as ChatCompletionRequestMessage)
-    );
-  }
-
-  getCurrentView(): MarkdownView | null {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    return view;
-  }
-
-  getEditor(editor: Editor | undefined): Editor {
-    if (!editor) {
-      editor = this.getCurrentView()?.editor;
-    }
-
-    if (!editor) {
-      throw new Error("No Editor found");
-    }
-
-    return editor;
+    return [...defaultSystemMessage, ...(messages ?? [])].map((message) => ({
+      role: "system",
+      content: message,
+    }));
   }
 
   async loadSettings() {
@@ -535,5 +336,6 @@ export default class ChatPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+    this.startPlugin();
   }
 }

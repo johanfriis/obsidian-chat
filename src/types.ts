@@ -1,12 +1,18 @@
 import { CreateChatCompletionRequest } from "openai";
 
+export type ChatSection = {
+  startLine: number;
+  endLine: number;
+  content: string;
+  headingLevel: number;
+};
+
 export type ChatConfig = {
-  title: string;
   template: string;
 };
 
 export type ChatSettings = CreateChatCompletionRequest;
 
-export type TitleChooserOption = {
-  title: string;
+export type ChooserOption = {
+  option: string;
 };

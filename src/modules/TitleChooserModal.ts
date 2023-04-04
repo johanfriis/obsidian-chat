@@ -1,29 +1,29 @@
 import { App, SuggestModal } from "obsidian";
-import { TitleChooserOption } from "src/types";
+import { ChooserOption } from "src/types";
 
-export class TitleChooserModal extends SuggestModal<TitleChooserOption> {
-  titles: string[];
-  callback: (item: string) => void;
+export class ChooserModal extends SuggestModal<ChooserOption> {
+  options: string[];
+  callback: (option: string) => void;
 
-  constructor(app: App, titles: string[]) {
+  constructor(app: App, options: string[]) {
     super(app);
-    this.titles = titles;
+    this.options = options;
   }
 
-  getSuggestions(query: string): TitleChooserOption[] {
-    return this.titles
-      .filter((title) => title.includes(query))
-      .map((title) => ({
-        title,
+  getSuggestions(query: string): ChooserOption[] {
+    return this.options
+      .filter((option) => option.includes(query))
+      .map((option) => ({
+        option,
       }));
   }
 
-  renderSuggestion(item: TitleChooserOption, el: HTMLElement) {
-    el.createEl("div", { text: item.title });
+  renderSuggestion(item: ChooserOption, el: HTMLElement) {
+    el.createEl("div", { text: item.option });
   }
 
-  onChooseSuggestion(item: TitleChooserOption) {
-    this.callback(item.title);
+  onChooseSuggestion(item: ChooserOption) {
+    this.callback(item.option);
   }
 
   public start(callback: (item: string) => void): void {

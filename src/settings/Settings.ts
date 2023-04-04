@@ -7,7 +7,9 @@ export const DEFAULT_SETTINGS: Settings = {
   apiKey: "",
   templateFolder: undefined,
   defaultTemplate: undefined,
-  chatName: undefined,
+  chatTitle: "New Chat",
+  chatName: "Chat",
+  userName: "User",
 };
 
 export class ChatSettingsTab extends PluginSettingTab {
@@ -25,7 +27,9 @@ export class ChatSettingsTab extends PluginSettingTab {
 
     this.addHeading();
     this.addApiKey();
+    this.addChatTitle();
     this.addChatName();
+    this.addUserName();
     this.addTemplateFolder();
     this.addDefaultTemplate();
   }
@@ -57,16 +61,47 @@ export class ChatSettingsTab extends PluginSettingTab {
       );
   }
 
+  addChatTitle(): void {
+    new Setting(this.containerEl)
+      .setName("Chat title")
+      .setDesc("What do the chat title to be?")
+      .addText((text) =>
+        text
+          .setPlaceholder("New chat")
+          .setValue(this.plugin.settings.chatTitle ?? "")
+          .onChange(async (value) => {
+            this.plugin.settings.chatTitle =
+              value || DEFAULT_SETTINGS.chatTitle;
+            await this.plugin.saveSettings();
+          })
+      );
+  }
+
   addChatName(): void {
     new Setting(this.containerEl)
-      .setName("Chat Name")
+      .setName("Chat name")
       .setDesc("What do you want the chat to call itself?")
       .addText((text) =>
         text
           .setPlaceholder("Chat")
           .setValue(this.plugin.settings.chatName ?? "")
           .onChange(async (value) => {
-            this.plugin.settings.chatName = value;
+            this.plugin.settings.chatName = value || DEFAULT_SETTINGS.chatName;
+            await this.plugin.saveSettings();
+          })
+      );
+  }
+
+  addUserName(): void {
+    new Setting(this.containerEl)
+      .setName("User name")
+      .setDesc("What do you want the chat to call you?")
+      .addText((text) =>
+        text
+          .setPlaceholder("User")
+          .setValue(this.plugin.settings.userName ?? "")
+          .onChange(async (value) => {
+            this.plugin.settings.userName = value || DEFAULT_SETTINGS.userName;
             await this.plugin.saveSettings();
           })
       );
