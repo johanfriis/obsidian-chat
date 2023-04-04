@@ -64,17 +64,19 @@ export class ChatSettingsTab extends PluginSettingTab {
   addChatTitle(): void {
     new Setting(this.containerEl)
       .setName("Chat title")
-      .setDesc("What do the chat title to be?")
-      .addText((text) =>
-        text
+      .setDesc("What do you want the chat title to be?")
+      .addText((text) => {
+        text.inputEl.style.width = "100%";
+
+        return text
           .setPlaceholder("New chat")
           .setValue(this.plugin.settings.chatTitle ?? "")
           .onChange(async (value) => {
             this.plugin.settings.chatTitle =
               value || DEFAULT_SETTINGS.chatTitle;
             await this.plugin.saveSettings();
-          })
-      );
+          });
+      });
   }
 
   addChatName(): void {
