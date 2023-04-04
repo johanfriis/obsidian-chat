@@ -293,8 +293,31 @@ export default class ChatPlugin extends Plugin {
   }
 
   startNewChat(editor: Editor, template?: string) {
-    const position = startNewChat(editor, this.settings.chatTitle, template);
-    editor.setCursor(position);
+    const cursor = editor.getCursor();
+    const line = editor.getLine(cursor.line);
+    const lastLine = editor.lastLine();
+
+    let newLine = cursor.line;
+    let spacing = 2;
+    let title = `## ${this.settings.chatTitle}\n`;
+
+    if (newLine === lastLine && line.length !== 0) {
+      title = `\n${title}`;
+    }
+
+    if (template) {
+      title = `${title}template::${template}\n`;
+      spacing += 1;
+    }
+
+    if (cursor.ch > 0 || line.length > 0) {
+      newLine += 1;
+      title = `${title}\n`;
+    }
+
+    editor.replaceRange(`${title}\n`, { line: newLine, ch: 0 });
+
+    editor.setCursor(newLine + spacing);
   }
 
   async getTemplateContent(template: string | undefined): Promise<string[]> {
