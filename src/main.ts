@@ -9,12 +9,7 @@ import {
 } from "openai";
 
 import { ChatSectionNotFound, DEFAULT_CHAT_SETTINGS } from "./consts";
-import {
-  getChatSection,
-  getProperties,
-  getTemplates,
-  startNewChat,
-} from "./helpers";
+import { getChatSection, getProperties, getTemplates } from "./helpers";
 import { ChatSection } from "./types";
 import { ChooserModal } from "./modules";
 
