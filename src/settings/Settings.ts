@@ -50,15 +50,17 @@ export class ChatSettingsTab extends PluginSettingTab {
     new Setting(this.containerEl)
       .setName("Api Key")
       .setDesc(help)
-      .addText((text) =>
-        text
+      .addText((text) => {
+        text.inputEl.type = "password";
+
+        return text
           .setPlaceholder("Api Key")
           .setValue(this.plugin.settings.apiKey ?? "")
           .onChange(async (value) => {
             this.plugin.settings.apiKey = value;
             await this.plugin.saveSettings();
-          })
-      );
+          });
+      });
   }
 
   addChatTitle(): void {
