@@ -8,7 +8,7 @@ export const DEFAULT_SETTINGS: Settings = {
   templateFolder: undefined,
   defaultTemplate: undefined,
   chatTitle: "New Chat",
-  chatName: "Chat",
+  chatName: "Assistant",
   userName: "User",
 };
 
